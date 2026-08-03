@@ -1,0 +1,53 @@
+# FapSkinRefresh 配置
+# ==========================================
+# 修复网易 V860 (3.9) 客户端玩家隐身问题
+# 原理：定期发送 PlayerSkinPacket（不经代理去重）+ despawn/spawn 重置实体渲染
+# ==========================================
+
+# ---- Namespace（与客户端 MOD 一致）----
+mod_name: "FapModMain"
+client_system: "FapModClient"
+
+# ---- 定期皮肤刷新 ----
+# 每 N 秒向所有在线玩家重发所有其他在线玩家的 PlayerSkinPacket
+# PlayerSkinPacket 不被 WaterdogPE 代理层去重拦截，可直接刷新客户端皮肤数据
+refresh:
+  # 开关
+  enabled: true
+  # 刷新间隔（秒）
+  interval: 60
+  # 每批处理的玩家对数量（避免一次性大量数据包）
+  batch_size: 10
+
+# ---- 全量实体刷新（despawn + spawn）----
+# 每 N 秒对所有在线玩家做 despawnFrom + spawnTo
+# 这会重置实体渲染状态，修复 AddPlayerPacket 引用失效的情况
+# 注意：会产生极短暂的实体闪烁（约 1 tick）
+full_refresh:
+  # 开关
+  enabled: true
+  # 刷新间隔（秒）
+  interval: 180
+  # 每批处理的玩家数量
+  batch_size: 5
+  # despawn 和 spawn 之间的延迟（tick），建议 1-2
+  spawn_delay: 1
+
+# ---- 客户端请求刷新 ----
+# 客户端（FapModMain）定期通过 PyRpc 请求服务端刷新附近玩家
+client_request:
+  # 开关
+  enabled: true
+  # 请求冷却时间（秒），防止客户端频繁请求
+  cooldown: 15
+  # 刷新半径（格），只刷新此范围内的其他玩家
+  radius: 128
+
+# ---- 进服延迟刷新 ----
+# 玩家进服后延迟 N 秒，向所有在线玩家发送该玩家的 PlayerSkinPacket
+join_refresh:
+  enabled: true
+  delay: 5
+
+# ---- 诊断日志 ----
+debug: false

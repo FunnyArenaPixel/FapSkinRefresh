@@ -1,0 +1,21 @@
+# Build output
+build/
+*.class
+
+# Dependency jars (local only)
+libs/
+
+# Compiled jar
+*.jar
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS files
+Thumbs.db
+.DS_Store

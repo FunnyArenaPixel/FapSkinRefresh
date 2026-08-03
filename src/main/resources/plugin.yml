@@ -1,0 +1,16 @@
+name: FapSkinRefresh
+main: cn.fapixel.fapskinrefresh.FapSkinRefresh
+version: "1.0.0"
+api: ["1.0.0"]
+author: FAPIXEL
+description: "FAPIXEL 玩家隐身修复插件 — 定期刷新 PlayerSkinPacket + despawn/spawn 修复 V860 客户端隐身问题"
+depend: [NukkitMaster]
+commands:
+  fapskin:
+    description: "FapSkinRefresh 管理命令"
+    usage: /fapskin [reload|refresh <playername|all>]
+    permission: fapskin.admin
+permissions:
+  fapskin.admin:
+    default: op
+    description: "FapSkinRefresh 管理权限"
