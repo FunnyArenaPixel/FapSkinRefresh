@@ -1,6 +1,6 @@
 name: FapSkinRefresh
 main: cn.fapixel.fapskinrefresh.FapSkinRefresh
-version: "1.0.0"
+version: "1.1.0"
 api: ["1.0.0"]
 author: FAPIXEL
 description: "FAPIXEL 玩家隐身修复插件 — 定期刷新 PlayerSkinPacket + despawn/spawn 修复 V860 客户端隐身问题"
