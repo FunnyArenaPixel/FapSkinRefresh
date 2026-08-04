@@ -3,6 +3,7 @@ package cn.fapixel.fapskinrefresh;
 import cn.nukkit.Player;
 import cn.nukkit.command.Command;
 import cn.nukkit.command.CommandSender;
+import cn.nukkit.entity.data.Skin;
 import cn.nukkit.event.EventHandler;
 import cn.nukkit.event.EventPriority;
 import cn.nukkit.event.Listener;
@@ -63,8 +64,10 @@ public class FapSkinRefresh extends cn.nukkit.plugin.PluginBase implements Liste
     // 客户端请求冷却记录：玩家名 → 上次请求时间戳
     private final Map<String, Long> clientRequestCooldowns = new ConcurrentHashMap<>();
 
-    // 全量刷新排队中的玩家对：每个元素是 [target, requester]
-    private final List<Object[]> fullRefreshQueue = new ArrayList<>();
+    // 定期皮肤刷新游标：轮转处理玩家，避免每次只刷新前 N 个
+    private int refreshSkinIndex = 0;
+
+    // 全量实体刷新游标：轮转处理玩家，确保所有玩家都能轮到
     private int fullRefreshQueueIndex = 0;
 
     @Override
@@ -109,40 +112,66 @@ public class FapSkinRefresh extends cn.nukkit.plugin.PluginBase implements Liste
     // ================================================================
 
     private void refreshAllSkins() {
+        refreshAllSkins(refreshBatchSize);
+    }
+
+    /**
+     * 定期皮肤刷新（PlayerSkinPacket，不经代理去重）。
+     * 游标轮转：每次只处理 batchSize 个 target 玩家，确保所有人都能轮到。
+     *
+     * @param batchSize 本轮处理的 target 玩家数（定时任务用配置值，手动命令传 Integer.MAX_VALUE）
+     */
+    private void refreshAllSkins(int batchSize) {
         if (getServer().getOnlinePlayers().size() < 2) return;
 
         List<Player> list = new ArrayList<>(getServer().getOnlinePlayers().values());
+        int size = list.size();
+        int actualBatch = Math.min(batchSize, size);
+
+        // 游标轮转：从上次结束位置继续，确保所有玩家都能轮到刷新
+        if (refreshSkinIndex >= size) {
+            refreshSkinIndex = 0;
+        }
+        int start = refreshSkinIndex;
         int count = 0;
 
-        for (Player target : list) {
+        for (int i = 0; i < actualBatch; i++) {
+            int idx = (start + i) % size;
+            Player target = list.get(idx);
             for (Player viewer : list) {
                 if (target == viewer) continue;
                 sendSkinPacket(target, viewer);
                 count++;
-                // 分批：每 batchSize 个包后延迟 1 tick
-                if (count >= refreshBatchSize) {
-                    // 分批通过调度器延迟，避免一次性大量包
-                    final int offset = count;
-                    // 简化：不分批延迟，因为 PlayerSkinPacket 很小
-                }
             }
         }
+        refreshSkinIndex = (start + actualBatch) % size;
 
         if (debug) {
-            getLogger().info("§7[SkinRefresh] 发送了 " + count + " 个 PlayerSkinPacket");
+            getLogger().info("§7[SkinRefresh] 发送了 " + count + " 个 PlayerSkinPacket"
+                    + " (游标: " + start + " → " + refreshSkinIndex + "/" + size + ")");
         }
     }
 
     /**
      * 向 viewer 发送 target 的 PlayerSkinPacket。
+     * 网易皮肤验证：无效皮肤替换为默认 Steve 皮肤，避免完全不显示。
      */
     private void sendSkinPacket(Player target, Player viewer) {
         if (target == null || viewer == null || !target.isOnline() || !viewer.isOnline()) return;
         try {
+            Skin skin = target.getSkin();
+            // 网易皮肤验证：检查皮肤数据是否合法（尺寸、格式、几何体等）
+            if (skin == null || !skin.isValid()) {
+                skin = Skin.NO_PERSONA_SKIN;
+                if (debug) {
+                    getLogger().warning("§e[SkinRefresh] " + target.getName()
+                            + " 皮肤无效，使用默认 Steve 皮肤");
+                }
+            }
             PlayerSkinPacket pkt = new PlayerSkinPacket();
             pkt.uuid = target.getUniqueId();
-            pkt.skin = target.getSkin();
-            pkt.newSkinName = target.getSkin().getSkinId();
+            pkt.skin = skin;
+            pkt.newSkinName = skin.getSkinId();
             pkt.oldSkinName = "";
             viewer.dataPacket(pkt);
         } catch (Throwable t) {
@@ -162,16 +191,32 @@ public class FapSkinRefresh extends cn.nukkit.plugin.PluginBase implements Liste
      * 每个 (target, viewer) 对：先 despawn target from viewer，延迟 spawnDelay tick 后 spawn。
      */
     private void fullRefreshAll() {
+        fullRefreshAll(fullRefreshBatchSize);
+    }
+
+    /**
+     * 全量实体刷新（despawn + spawn，重置实体渲染）。
+     * 游标轮转：每次只处理 batchSize 个 target 玩家，确保所有人都能轮到。
+     *
+     * @param batchSize 本轮处理的 target 玩家数（定时任务用配置值，手动命令传 Integer.MAX_VALUE）
+     */
+    private void fullRefreshAll(int batchSize) {
         if (getServer().getOnlinePlayers().size() < 2) return;
 
         List<Player> list = new ArrayList<>(getServer().getOnlinePlayers().values());
-        int count = 0;
+        int size = list.size();
+        int actualBatch = Math.min(batchSize, size);
 
-        for (Player target : list) {
-            // 只对每个 target 做一次 despawnFromAll + spawnToAll
-            // 这比对每个 viewer 单独做效率更高
-            final Player t = target;
-            final int delay = fullRefreshSpawnDelay;
+        // 游标轮转：从上次结束位置继续，确保所有玩家都能轮到全量刷新
+        if (fullRefreshQueueIndex >= size) {
+            fullRefreshQueueIndex = 0;
+        }
+        int start = fullRefreshQueueIndex;
+        final int delay = fullRefreshSpawnDelay;
+
+        for (int i = 0; i < actualBatch; i++) {
+            int idx = (start + i) % size;
+            final Player t = list.get(idx);
 
             // despawn from all
             try {
@@ -190,16 +235,12 @@ public class FapSkinRefresh extends cn.nukkit.plugin.PluginBase implements Liste
                     }
                 }
             }, delay);
-
-            count++;
-            if (count >= fullRefreshBatchSize) {
-                // 分批：剩余玩家延迟到下一 tick
-                break; // 本轮只处理 batchSize 个，下一轮定时任务再处理
-            }
         }
+        fullRefreshQueueIndex = (start + actualBatch) % size;
 
         if (debug) {
-            getLogger().info("§7[SkinRefresh] 全量刷新了 " + count + " 个玩家实体");
+            getLogger().info("§7[SkinRefresh] 全量刷新了 " + actualBatch + " 个玩家实体"
+                    + " (游标: " + start + " → " + fullRefreshQueueIndex + "/" + size + ")");
         }
     }
 
@@ -321,8 +362,9 @@ public class FapSkinRefresh extends cn.nukkit.plugin.PluginBase implements Liste
             case "refresh":
                 if (args.length >= 2 && args[1].equalsIgnoreCase("all")) {
                     sender.sendMessage("§e[SkinRefresh] 正在全量刷新...");
-                    refreshAllSkins();
-                    fullRefreshAll();
+                    // 手动命令一次性处理所有玩家（不限制 batch_size）
+                    refreshAllSkins(Integer.MAX_VALUE);
+                    fullRefreshAll(Integer.MAX_VALUE);
                     sender.sendMessage("§a[SkinRefresh] 刷新完成。");
                 } else if (args.length >= 2) {
                     Player target = getServer().getPlayerExact(args[1]);
